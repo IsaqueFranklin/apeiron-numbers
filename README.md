@@ -1,59 +1,57 @@
-# Apeiron: Atomic-Scale Entropy via High-Entropy Alloys (HEAs)
+# Apeiron: vacancy kinetic Monte Carlo on a chemically disordered FCC lattice
 
-**Apeiron** is a research framework designed to investigate the feasibility of using the intrinsic chemical disorder of **High-Entropy Alloys (HEAs)** and **Ultra-High-Entropy Alloys (UHEAs)** as a physical source of entropy for cryptographic hardware. By mapping the stochastic fluctuations of the **Potential Energy Landscape (PES)** at the atomic level, this project develops a methodology for generating high-quality **True Random Numbers (TRNG)**.
+This repository simulates one vacancy moving through an approximately equiatomic Co, Ni, Cr, Fe, Mn alloy. Its main research output is the physical waiting-time series, `dt_1, dt_2, ...`, produced by rejection-free kinetic Monte Carlo (KMC). Every event also records all twelve possible transitions, so the energy and rate calculations can be audited.
 
----
+The energetic model is motivated by the vacancy migration-barrier statistics reported by [Thomas and Patala (2020)](https://doi.org/10.1016/j.actamat.2020.06.022). Their 2,971 NEB calculations yielded an approximately Gaussian migration-barrier distribution with mean 0.81 eV and standard deviation 0.32 eV. Here, barriers are derived from a well energy at the starting vacancy state and one symmetric saddle energy for the transition:
 
-## 🔬 Scientific Overview
+```text
+E_ij = s_ij - w_i
+r_ij = nu exp(-E_ij / (k_B T))
+```
 
-Traditional hardware TRNGs often rely on thermal noise or ring oscillators. **Apeiron** shifts this paradigm to the material's atomic architecture. In HEAs (e.g., **CoCrFeNi**), the "chemical chaos" created by multiple principal elements results in a rugged energy landscape. We treat this lattice as a natural stochastic medium where carrier transport and atomic transitions become inherently unpredictable due to local neighborhood variations.
+The independent energy scales are `w ~ N(0, 0.110^2)` eV and `s ~ N(0.81, 0.304^2)` eV. Saddles below either endpoint well are rejected and redrawn. This slightly truncates the model distribution, so the realized moments should be inspected rather than assumed equal to the untruncated values.
 
-### Key Objectives
-* **Atomic Modeling:** Constructing FCC/BCC supercells for HEAs and UHEAs using the **Atomic Simulation Environment (ASE)**.
-* **Physical Grounding:** Integrating real-world thermodynamic data (enthalpies of mixing, electronegativities) sourced from the **AFLOW** database to ensure simulations reflect physical reality.
-* **Stochastic Dynamics:** Utilizing **Kinetic Monte Carlo (kMC)** to simulate transition processes governed by local energy barriers.
-* **Cryptographic Validation:** Subjecting the extracted bitstreams to the **NIST SP 800-22** statistical test suite to verify randomness quality.
+## Install
 
----
+Python 3.10 or newer is recommended. No ASE or AFLOW installation is needed.
 
-## 🛠 Methodology
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+```
 
-The project is structured into three primary computational layers:
+## Run
 
-### 1. Construction of the Stochastic Medium
-We generate crystal lattices where elements are distributed to mimic a solid solution state. By increasing the number of principal elements (moving from HEAs to UHEAs), we analyze how configurational entropy scales with the quality of the generated randomness.
+```bash
+python main.py --jumps 10000 --temperature 1273 --cells 8 \
+  --attempt-frequency 1e13 --seed 2020 --output results/run-1273K --plot
+```
 
-### 2. Data-Driven Energy Mapping
-Instead of using idealized mathematical models, Apeiron utilizes **Data Mining via the AFLOW API**. For every atomic site, the local environment’s energy is calculated based on:
-* Interatomic interaction parameters.
-* Diffusion barriers specific to the alloy's composition.
-* Lattice distortion effects.
+All options are available through `python main.py --help`. `--cells 8` creates `4 × 8^3 = 2048` FCC sites including one vacancy. At least three cells per axis are required. `--seed` reproduces lattice composition, energy mapping, and KMC draws. Specify a different output directory for each run. `--temperature` is in kelvin, `--attempt-frequency` is in inverse seconds, and `--jumps` is the number of vacancy swaps.
 
-### 3. Entropy Extraction & Post-Processing
-The core entropy source is derived from the **waiting times** and **transition probabilities** of carriers jumping between sites. Because every site has a unique chemical neighborhood, these transitions occur at erratic intervals.
-* **Hopping Mechanism:** Simulated via kMC, where transitions are thermally activated and barrier-dependent.
-* **Digitization:** The erratic timing of these physical events is converted into binary sequences.
-* **Bias Correction:** We implement a **Von Neumann Extractor** to eliminate any statistical bias (unbalance between 0s and 1s) inherent in the physical process.
+Before each run, the program draws one million independent model barriers by default. It prints their mean and standard deviation and stores the full summary. This mandatory preflight can be shortened for quick development checks with `--preflight-samples 10000`; use the default count for research runs. The preflight checks the ensemble model, while the `realized_offered_barriers` summary describes the barriers encountered along the actual vacancy path.
 
----
+Output files:
 
-## 📊 Statistical Validation
+| File | Contents |
+| --- | --- |
+| `waiting_times.csv` | Event number and `dt_s`, the primary time series |
+| `events.csv` | Origin, destination, moving atom, vacancy location, source well, twelve saddles, twelve barriers, twelve rates, total rate, waiting time, cumulative time, and random draws |
+| `summary.json` | Configuration, preflight and realized barrier moments, rejection counts, time, and bit-test results |
+| `bits.txt` | Exploratory one-bit-per-event digitization of waiting times |
+| `diagnostics.png` | Barrier histograms and waiting-time trace, if `--plot` was set |
 
-To prove that "Atomic Chaos" is viable for cybersecurity, all generated data is benchmarked against the **National Institute of Standards and Technology (NIST) SP 800-22** suite. This includes tests for:
-* Frequency and Block Frequency.
-* Cumulative Sums.
-* Longest Run of Ones.
-* Non-overlapping Template Matching.
+The twelve array entries in an event follow `apeiron.model.OFFSETS`; `selected_neighbor` is their zero-based index. `vacancy` is the position after the recorded swap. Coordinates are integer FCC coordinates, with periodic wraparound.
 
----
+## Statistical checks and interpretation
 
-## 🚀 Tech Stack
+The included bit analysis compares each waiting time against the median of the same run, then applies a small subset of NIST SP 800-22 Rev. 1a: frequency, block frequency, and runs. The median is estimated from the complete series, so the bits are an exploratory diagnostic with a built-in global balance constraint. The code does not implement the complete NIST suite, and passing its tests would not establish cryptographic security or a physical true random number generator. This simulation uses a seeded pseudorandom generator and its output is reproducible. The central result for the TCC is the waiting-time series and its physical/statistical diagnostics.
 
-* **ASE (Atomic Simulation Environment):** For lattice construction and manipulation.
-* **AFLOW API:** For retrieving thermodynamic and crystallographic properties.
-* **Python:** Main engine for kMC implementation and data orchestration.
-* **NIST SP 800-22:** Statistical validation framework.
+Run the automated checks with:
 
----
+```bash
+python -m unittest discover -s tests -v
+```
 
-> **Etymology:** *Apeiron* (Greek: ἄπειρον) refers to the "infinite" or "indefinite" primordial substance from which all things arise. In this project, it represents the boundless complexity of the atomic landscape as a source of pure randomness.
+For the energy model, KMC procedure, code map, and limitations, see [docs/architecture.md](docs/architecture.md).

@@ -54,4 +54,4 @@ Run the automated checks with:
 python -m unittest discover -s tests -v
 ```
 
-For the energy model, KMC procedure, code map, and limitations, see [docs/architecture.md](docs/architecture.md).
+For a detailed explanation of every command option, the KMC equations, and bit generation, see [docs/theory-and-run-guide.md](docs/theory-and-run-guide.md). For the code map and modeling decisions, see [docs/architecture.md](docs/architecture.md).

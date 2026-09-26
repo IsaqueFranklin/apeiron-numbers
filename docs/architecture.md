@@ -1,5 +1,7 @@
 # Architecture and scientific basis
 
+For a parameter-by-parameter command guide and a fuller derivation of the waiting-time and bit rules, see [theory-and-run-guide.md](theory-and-run-guide.md).
+
 ## Purpose and source
 
 The model produces a sequence of physical waiting times for a single vacancy diffusing on an FCC lattice with chemical disorder. Thomas and Patala, *Acta Materialia* 196 (2020), 144 to 153, [DOI 10.1016/j.actamat.2020.06.022](https://doi.org/10.1016/j.actamat.2020.06.022), analyzed 2,971 NEB vacancy migrations in CoCrFeMnNi. Their fitted migration-barrier mean and standard deviation were 0.81 and 0.32 eV. They separated the two directions of a transition into symmetric and antisymmetric components with measured standard deviations `sigma_+ = 0.314` eV and `sigma_- = 0.078` eV. They also explain why a distribution of barriers alone is insufficient to represent a rugged energy landscape.

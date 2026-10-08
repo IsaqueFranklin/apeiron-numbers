@@ -93,12 +93,17 @@ def assemble(root, output, thesis_dir=None):
             tables['tests'].append([name,testnames[test],pt(t['statistic'],4) if t['statistic'] is not None else 'Não aplicável',ptext,states[t['status']]])
     data={'tables':tables,'raw_summaries':runs,'manifest':manifest}
     (output/'dados-resultados.json').write_text(json.dumps(data,indent=2,ensure_ascii=False)+'\n')
-    source=(original/'tcc-final.typ').read_text()
+    # The editable base excludes the result includes. tcc-final.typ may now be
+    # a compatibility wrapper pointing to the current assembled document.
+    base_source = original/'tcc-base.typ'
+    source=(base_source if base_source.exists() else original/'tcc-final.typ').read_text()
     methodology = '= Metodologia\n\n'
     code_reference = ('As simulações deste trabalho foram executadas com o código Apeiron, '
                       'desenvolvido em Python e disponível no repositório '
                       '#link("https://github.com/IsaqueFranklin/apeiron-numbers")[`apeiron-numbers`] '
-                      '@apeiron2026. A versão utilizada foi preservada com os dados, junto das sementes '
+                      '@apeiron2026. A versão pública de referência é o '
+                      '#link("https://github.com/IsaqueFranklin/apeiron-numbers/tree/8a337d0ab89a94216c00b4f1e5a2d666710f79a3")[commit `8a337d0`]. '
+                      'O código efetivamente executado foi preservado com os dados, junto das sementes '
                       'e dos registros de execução.\n\n')
     if '@apeiron2026' not in source:
         if source.count(methodology) != 1:
@@ -120,7 +125,8 @@ def assemble(root, output, thesis_dir=None):
     source = source.replace('Procedimentos previstos', 'Procedimentos adotados')
     obsolete='O @fluxo:metodologia reúne as etapas do procedimento. A implementação consultada já contém o modelo energético, o KMC, a conversão por mediana e os testes estatísticos. A execução conjunta de H0, H1 e H2 depende da extensão dos parâmetros de entrada, pois os desvios padrão ainda estão fixados no código. As análises são realizadas depois dessa adequação, sem antecipar resultados.'
     updated='O @fluxo:metodologia reúne as etapas do procedimento. A implementação foi estendida para receber uma configuração comum de parâmetros na paisagem e na verificação prévia, cadastrar H0, H1 e H2 em um comando e registrar a proveniência de cada rodada. As três execuções completas e as verificações científicas estão documentadas no capítulo de resultados.'
-    if obsolete not in source: raise ValueError('source paragraph changed; inspect before replacing')
+    if obsolete not in source and not base_source.exists():
+        raise ValueError('source paragraph changed; inspect before replacing')
     source=source.replace(obsolete,updated)
     source=source.replace('Essas saídas comparativas são acrescentadas na adequação do programa.','Essas saídas comparativas foram acrescentadas ao programa e são apresentadas no capítulo de resultados.')
     paragraphs = source.split('\n\n')

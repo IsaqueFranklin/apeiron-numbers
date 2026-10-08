@@ -4,6 +4,8 @@ import hashlib
 import math
 import random
 
+from .config import EnergyConfig
+
 K_B = 8.617333262e-5  # eV/K
 SPECIES = ("Co", "Ni", "Cr", "Fe", "Mn")
 VACANCY = 5
@@ -37,12 +39,20 @@ class FCCLattice:
         rng.shuffle(atoms)
         self.occupancy = dict(zip(self.sites[1:], atoms))
         self.occupancy[self.vacancy] = VACANCY
+        self._neighbors = {
+            site: tuple(tuple((a + b) % self.side for a, b in zip(site, d)) for d in OFFSETS)
+            for site in self.sites
+        }
 
     def at(self, point):
         return self.occupancy[tuple(v % self.side for v in point)]
 
     def neighbors(self, point):
-        return tuple(tuple((a + b) % self.side for a, b in zip(point, d)) for d in OFFSETS)
+        point = tuple(point)
+        try:
+            return self._neighbors[point]
+        except KeyError:
+            return self._neighbors[tuple(v % self.side for v in point)]
 
     def swap(self, destination):
         origin = self.vacancy
@@ -56,16 +66,33 @@ class FCCLattice:
 class EnergyLandscape:
     """Translation-invariant chemical keys with reproducible Gaussian energies."""
 
-    def __init__(self, lattice, seed):
+    def __init__(self, lattice, seed, config=None):
         self.lattice = lattice
         self.seed = seed
+        self.config = config if config is not None else EnergyConfig()
         self.wells = {}
         self.saddles = {}
         self.saddle_draws = 0
         self.saddle_rejections = 0
+        self._frames = {}
+        self._bridge_sites = {}
+        for offset in OFFSETS:
+            bridge = set(OFFSETS)
+            bridge.update(tuple(a + b for a, b in zip(offset, d)) for d in OFFSETS)
+            forward = tuple(sorted(bridge - {(0, 0, 0), offset}))
+            reverse = tuple(sorted(tuple(v - d for v, d in zip(p, offset)) for p in forward))
+            backwards = reverse < forward
+            canonical = tuple(-v for v in offset) if backwards else offset
+            self._frames[offset] = (OFFSETS.index(canonical), min(forward, reverse), backwards)
 
     def _rng(self, kind, key):
-        material = repr((self.seed, kind, key)).encode("ascii")
+        # Decode compact, exact cache keys to preserve the original seeded draws.
+        if kind == "well":
+            original_key = tuple(key)
+        else:
+            coordinates = self._frames[OFFSETS[key[0]]][1]
+            original_key = (key[1], tuple(zip(coordinates, key[2:])))
+        material = repr((self.seed, kind, original_key)).encode("ascii")
         digest = hashlib.blake2b(material, digest_size=16).digest()
         return random.Random(int.from_bytes(digest, "big"))
 
@@ -75,56 +102,45 @@ class EnergyLandscape:
             if virtual_swap is not None:
                 a, b = virtual_swap
                 if point == a:
-                    return self.lattice.at(b)
+                    return self.lattice.occupancy[b]
                 if point == b:
-                    return self.lattice.at(a)
-            return self.lattice.at(point)
+                    return self.lattice.occupancy[a]
+            return self.lattice.occupancy[point]
 
-        return tuple(atom(p) for p in self.lattice.neighbors(site))
+        return bytes(atom(p) for p in self.lattice.neighbors(site))
 
     def well(self, site, virtual_swap=None):
         key = self.well_key(site, virtual_swap)
         if key not in self.wells:
-            self.wells[key] = self._rng("well", key).gauss(0.0, 0.110)
+            self.wells[key] = (self.config.mu_w if self.config.sigma_w == 0 else
+                               self._rng("well", key).gauss(self.config.mu_w, self.config.sigma_w))
         return self.wells[key]
 
     def transition_key(self, origin, offset):
         """Moving atom plus bridge shell, invariant to reversing the hop."""
-        destination = tuple((a + b) % self.lattice.side for a, b in zip(origin, offset))
-        moving_atom = self.lattice.at(destination)
-        bridge = set(OFFSETS)
-        bridge.update(tuple(a + b for a, b in zip(offset, d)) for d in OFFSETS)
-        bridge.update(((0, 0, 0), offset))
-
-        def orientation(anchor, coordinates, edge_offset):
-            return tuple(
-                (relative, self.lattice.at(
-                    tuple((a + b) % self.lattice.side for a, b in zip(anchor, relative))
-                ))
-                for relative in sorted(coordinates)
-                if relative != (0, 0, 0) and relative != edge_offset
+        destination = self.lattice.neighbors(origin)[OFFSETS.index(offset)]
+        direction, coordinates, backwards = self._frames[offset]
+        anchor = destination if backwards else origin
+        geometry_key = (anchor, direction)
+        if geometry_key not in self._bridge_sites:
+            self._bridge_sites[geometry_key] = tuple(
+                tuple((a + b) % self.lattice.side for a, b in zip(anchor, p))
+                for p in coordinates
             )
-
-        # Endpoint atoms are omitted from the bridge shell. The atom moving
-        # through the saddle is recorded separately. Reverse orientation maps
-        # every relative vector v to v - offset.
-        forward = orientation(origin, bridge, offset)
-        opposite = tuple(-v for v in offset)
-        reverse = orientation(destination, {tuple(v - d for v, d in zip(p, offset)) for p in bridge}, opposite)
-        return (moving_atom, min(forward, reverse))
+        occupancy = self.lattice.occupancy
+        return bytes((direction, occupancy[destination])) + bytes(
+            occupancy[p] for p in self._bridge_sites[geometry_key]
+        )
 
     def saddle(self, origin, offset, source_well, destination_well):
         key = self.transition_key(origin, offset)
         if key not in self.saddles:
-            rng = self._rng("saddle", key)
             threshold = max(source_well, destination_well)
-            while True:
-                candidate = rng.gauss(0.81, 0.304)
-                self.saddle_draws += 1
-                if candidate >= threshold:
-                    self.saddles[key] = candidate
-                    break
-                self.saddle_rejections += 1
+            rng = self._rng("saddle", key) if self.config.sigma_s else None
+            candidate, draws = self.config.draw_saddle(rng, threshold)
+            self.saddles[key] = candidate
+            self.saddle_draws += draws
+            self.saddle_rejections += draws - 1
         saddle = self.saddles[key]
         if saddle < max(source_well, destination_well):
             raise RuntimeError("same transition key has inconsistent endpoint wells")
@@ -133,8 +149,8 @@ class EnergyLandscape:
 
 class KMC:
     def __init__(self, lattice, landscape, temperature, attempt_frequency, seed):
-        if temperature <= 0 or attempt_frequency <= 0:
-            raise ValueError("temperature and attempt frequency must be positive")
+        if not all(math.isfinite(v) and v > 0 for v in (temperature, attempt_frequency)):
+            raise ValueError("temperature and attempt frequency must be finite and positive")
         self.lattice = lattice
         self.landscape = landscape
         self.temperature = temperature

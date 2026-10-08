@@ -96,39 +96,62 @@ def bits_from_waiting_times(waiting_times):
     return (values > threshold).astype(np.uint8), threshold
 
 
-def nist_subset(bits, block_size=128):
-    """SP 800-22 Rev. 1a monobit, block frequency, and runs tests."""
-    x = np.asarray(bits, dtype=np.uint8)
+def select_block_size(n):
+    """Choose at most 50 blocks and meet SP 800-22 section 2.2.7 for n >= 100."""
+    return max(20, (n + 49) // 50)
+
+
+def nist_subset(bits, block_size=None):
+    """SP 800-22 Rev. 1a monobit, block frequency and runs, alpha=0.01."""
+    values = np.asarray(bits)
+    if values.ndim != 1 or not np.all((values == 0) | (values == 1)):
+        raise ValueError("bits must be a one-dimensional binary sequence")
+    x = values.astype(np.uint8)
     n = len(x)
-    if n < 100:
-        return {"status": "insufficient_bits", "bits": n, "minimum_bits": 100}
+    if block_size is None:
+        block_size = select_block_size(n)
+    if isinstance(block_size, bool) or not isinstance(block_size, int) or block_size < 1:
+        raise ValueError("block_size must be a positive integer")
     ones = int(x.sum())
-    proportion = ones / n
-    monobit = math.erfc(abs(2 * ones - n) / math.sqrt(2 * n))
+    proportion = ones / n if n else None
+    runs = 1 + int(np.count_nonzero(x[1:] != x[:-1])) if n else 0
     blocks = n // block_size
-    if blocks:
-        chunk = x[: blocks * block_size].reshape(blocks, block_size)
-        chi_square = float(4 * block_size * np.sum((chunk.mean(axis=1) - 0.5) ** 2))
-        block_p = float(gammaincc(blocks / 2, chi_square / 2))
+    prerequisite = bool(n and abs(proportion - 0.5) < 2 / math.sqrt(n))
+    tests = {}
+    def record(name, statistic, p, reason=None):
+        tests[name] = {"statistic": statistic, "p_value": p,
+                       "status": "not_applicable" if p is None else ("pass" if p >= 0.01 else "fail"),
+                       "reason": reason}
+    if n < 100:
+        for name in ("monobit", "block_frequency", "runs"):
+            record(name, None, None, "fewer than 100 bits")
+        monobit = block_p = runs_p = None
     else:
+        s_obs = abs(2 * ones - n) / math.sqrt(n)
+        monobit = math.erfc(s_obs / math.sqrt(2))
+        record("monobit", s_obs, monobit)
+        chi_square = None
         block_p = None
-    if abs(proportion - 0.5) >= 2 / math.sqrt(n):
+        if blocks:
+            chunk = x[:blocks * block_size].reshape(blocks, block_size)
+            chi_square = float(4 * block_size * np.sum((chunk.mean(axis=1) - 0.5) ** 2))
+            block_p = float(gammaincc(blocks / 2, chi_square / 2))
+        record("block_frequency", chi_square, block_p, "no complete block" if not blocks else None)
         runs_p = None
-    else:
-        runs = 1 + int(np.count_nonzero(x[1:] != x[:-1]))
-        numerator = abs(runs - 2 * n * proportion * (1 - proportion))
-        denominator = 2 * math.sqrt(2 * n) * proportion * (1 - proportion)
-        runs_p = math.erfc(numerator / denominator)
-    alpha = 0.01
-    return {
-        "status": "ok", "bits": n, "ones_fraction": proportion,
-        "alpha": alpha, "block_size": block_size,
-        "monobit_p": monobit, "block_frequency_p": block_p,
-        "runs_p": runs_p,
-        "runs_prerequisite_met": runs_p is not None,
-        "passed": {
-            "monobit": monobit >= alpha,
-            "block_frequency": block_p >= alpha if block_p is not None else None,
-            "runs": runs_p >= alpha if runs_p is not None else None,
-        },
-    }
+        runs_stat = None
+        if prerequisite:
+            runs_stat = abs(runs - 2*n*proportion*(1-proportion)) / (2*math.sqrt(2*n)*proportion*(1-proportion))
+            runs_p = math.erfc(runs_stat)
+        record("runs", runs_stat, runs_p, None if prerequisite else "global-frequency prerequisite failed")
+    return {"status": "ok" if n >= 100 else "insufficient_bits", "bits": n,
+            "minimum_bits": 100, "ones": ones, "ones_fraction": proportion,
+            "runs_count": runs, "alpha": 0.01, "block_size": block_size,
+            "complete_blocks": blocks, "residual_bits": n % block_size,
+            "block_recommendations": {"M_ge_20": block_size >= 20,
+                                      "M_gt_0_01_n": block_size > .01*n, "blocks_lt_100": blocks < 100},
+            "runs_prerequisite_met": prerequisite,
+            "runs_prerequisite": {"absolute_deviation": abs(proportion-.5) if n else None,
+                                  "strict_upper_bound": 2/math.sqrt(n) if n else None},
+            "monobit_p": monobit, "block_frequency_p": block_p, "runs_p": runs_p,
+            "tests": tests, "passed": {name: None if t["p_value"] is None else t["status"] == "pass"
+                                       for name, t in tests.items()}}

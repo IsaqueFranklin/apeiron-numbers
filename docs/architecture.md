@@ -50,12 +50,20 @@ The common attempt frequency defaults to `1e13` per second and the temperature t
 
 ## Exploratory bit analysis and plots
 
-`apeiron/cli.py` writes one bit per waiting time using `bit = 1` when `dt` exceeds the median of the run. `analysis.py` computes p-values for the monobit frequency, frequency within 128-bit blocks, and runs tests from [NIST SP 800-22 Rev. 1a](https://doi.org/10.6028/NIST.SP.800-22r1a). A runs result is omitted when its frequency prerequisite fails. Short streams under 100 bits are labeled insufficient. These checks are a subset of the suite, not a certification. The in-sample median forces near-perfect bit balance, so the monobit result must not be interpreted as independent evidence of quality. The seeded simulation is pseudorandom; a high p-value does not prove independence, unpredictability, or usable entropy. For stronger randomness research, use independent runs and an extraction method with an explicit entropy estimate and holdout validation.
+`apeiron/cli.py` writes one bit per waiting time using `bit = 1` when `dt` exceeds the median of the run. `analysis.py` computes p-values for the monobit frequency, frequency within automatically sized blocks, and runs tests from [NIST SP 800-22 Rev. 1a](https://doi.org/10.6028/NIST.SP.800-22r1a). A runs result is omitted when its frequency prerequisite fails. Short streams under 100 bits are labeled insufficient. These checks are a subset of the suite, not a certification. The in-sample median forces near-perfect bit balance, so the monobit result must not be interpreted as independent evidence of quality. The seeded simulation is pseudorandom; a high p-value does not prove independence, unpredictability, or usable entropy. For stronger randomness research, use independent runs and an extraction method with an explicit entropy estimate and holdout validation.
 
-With `--plot`, Matplotlib writes `diagnostics.png`, showing offered and selected barrier histograms alongside the waiting-time trace. The plot is a descriptive comparison, not a goodness-of-fit test.
+With `--plot`, Matplotlib writes `diagnostics.png` and a vector `diagnostics.pdf`. The six panels show offered and selected barrier distributions, the waiting-time distribution and trace, bit run lengths, balance within the blocks used by the test, and short-lag bit autocorrelation. The fair-coin curves are visual references, not additional NIST tests. A completed run can also be plotted afterward with `python -m apeiron.plotting RESULTS_DIRECTORY`.
 
 ## Module map and verification
 
 `main.py` enters the CLI. `apeiron/model.py` owns lattice state, chemical-key energies, and KMC stepping. `apeiron/analysis.py` owns the ensemble preflight and statistical functions. `apeiron/cli.py` parses run parameters and writes outputs. `tests/test_model.py` checks FCC geometry, composition, environment changes, saddle reversal, nonnegative barriers, KMC records and reproducibility, the preflight moments, and basic bit-test behavior.
 
 Use `python -m unittest discover -s tests -v` after a change. For a full demonstration run, use `python main.py --jumps 10000 --plot` and inspect `summary.json` before interpreting the time series.
+
+## TCC parameterized scenarios
+
+`apeiron/config.py` provides an immutable `EnergyConfig` shared by `EnergyLandscape` and the independent preflight. `apeiron/cli.py` accepts `--scenarios NAME:SIGMA_S:SIGMA_W ...`, or a single run with `--sigma-s`/`--sigma-w`. Each run has a new lattice and new caches, with the seed split preserved. The output manifest includes the base commit, exact source hashes and source snapshots because local changes are part of the executed model.
+
+Energy signatures now use compact exact byte keys and precomputed geometry, conserving translational identity, immediate reversal and orientation dependence. The original tuple is restored for the BLAKE2b energy seed, so the reference H2 energy assignments are unchanged. A regression against the scientific reference commit verifies the full event records for 100 jumps.
+
+Offered moments and histograms are merged in batches, and full events and waiting times are written incrementally. No twelve-million-float Python list is retained. A disk-space check runs before simulation; exceptions mark results incomplete. `apeiron/comparison.py` includes completed runs only and produces comparable monochrome figures. The [Portuguese guide](funcionamento-codigo.md) describes exact CLI usage, data fields, scientific assumptions, validation and interpretation.

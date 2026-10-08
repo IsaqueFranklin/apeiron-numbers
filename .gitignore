@@ -3,3 +3,5 @@ __pycache__/
 .venv/
 venv/
 results/
+tcc-apeiron-caps/
+tcc-apeiron-words/

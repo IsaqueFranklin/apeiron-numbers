@@ -19,8 +19,8 @@ The backslash at the end of the first line tells a Unix shell to continue the sa
 | `--cells 8` | Number of conventional FCC cells along each axis | `4 × 8³ = 2048` sites, consisting of 2,047 atoms and one vacancy |
 | `--attempt-frequency 1e13` | Common attempt frequency `nu`, in inverse seconds | `10¹³ s⁻¹` multiplies every transition rate and sets the time scale |
 | `--seed 2020` | Integer seed for reproducibility | Fixes the initial shuffled alloy, environment-to-energy mapping, KMC draws, and preflight draws |
-| `--output results/run-1273K` | Directory for this run, relative to the repository when invoked there | Saves CSV, JSON, bits, and plot in that directory; a later run using the same path overwrites those files |
-| `--plot` | Boolean switch | Write `diagnostics.png`; omit it to skip plotting |
+| `--output results/run-1273K` | Directory for this run, relative to the repository when invoked there | Saves CSV, JSON, bits, and plots in that directory. A later run refuses to overwrite existing event records or summaries |
+| `--plot` | Boolean switch | Write `diagnostics.png` and `diagnostics.pdf`; omit it to skip plotting during the simulation |
 
 Additional options are shown by `python main.py --help`. `--preflight-samples` defaults to `1000000` independent barrier samples. `--cells` must be at least 3, and the temperature, attempt frequency, preflight count, and number of jumps must be positive. The code has no lattice constant in meters, so positions are dimensionless FCC lattice coordinates. It reports time in seconds, not a physical displacement or diffusion coefficient.
 
@@ -90,6 +90,22 @@ For example, if four waiting times in arbitrary units are `[0.2, 0.9, 0.4, 0.1]`
 
 The threshold is estimated from the very same run that is tested. With an even number of distinct waiting times, this construction forces exactly half the bits to be one. Therefore a frequency or monobit test will look perfect by construction, regardless of whether the underlying process is independent. Changing one time can move the median and affect other bits. The median rule also ignores the magnitude of a waiting time once it has been classified. It is useful for an exploratory comparison of temporal patterns, but it does not extract a proven amount of entropy.
 
-The code reports three p-values from a subset of [NIST SP 800-22 Rev. 1a](https://doi.org/10.6028/NIST.SP.800-22r1a): monobit frequency, frequency within 128-bit blocks, and runs. At the configured significance level `alpha = 0.01`, a p-value below `0.01` flags a failed check. The runs test is omitted if its required overall frequency condition fails. The block test is omitted if there are fewer than 128 bits, and streams under 100 bits are marked insufficient. This is not the full NIST battery; one stream and three tests cannot characterize an entropy source. A failed block or runs test may reveal temporal structure even while the median forces the global bit count to be balanced.
+The code reports three p-values from a subset of [NIST SP 800-22 Rev. 1a](https://doi.org/10.6028/NIST.SP.800-22r1a): monobit frequency, frequency within automatically sized blocks, and runs. At the configured significance level `alpha = 0.01`, a p-value below `0.01` flags a failed check. The runs test is omitted if its required overall frequency condition fails. The block test is omitted if there is no complete block, and streams under 100 bits are marked insufficient. This is not the full NIST battery; one stream and three tests cannot characterize an entropy source. A failed block or runs test may reveal temporal structure even while the median forces the global bit count to be balanced.
 
 Finally, the program calls seeded pseudorandom generators to draw the alloy, energies, jump choices, and waiting times. The resulting file is reproducible from the seed and is **not a physical true random number generator**. Statistical tests can detect some patterns; passing them would not prove unpredictability or cryptographic security. Studying randomness as a separate research question would require a clearly specified extractor, independent validation data, multiple runs, and an entropy model appropriate to the intended application.
+
+## Parameterized TCC runs
+
+The implemented multi-run command is:
+
+```bash
+python main.py --scenarios H0:0:0 H1:0.152:0.055 H2:0.304:0.110 \
+  --jumps 1000000 --temperature 1273 --cells 8 --attempt-frequency 1e13 \
+  --seed 2020 --preflight-samples 1000000 --output results/tcc --plot
+```
+
+The order is name, saddle sigma, well sigma. H1 is a planning interpolation. All means remain 0.81 eV for saddles and 0 eV for wells, unless explicitly set using `--mu-s` and `--mu-w`. For one run, omit `--scenarios` and use `--sigma-s` and `--sigma-w`. Sigmas must be finite/nonnegative; zero means an exact constant. Constant saddles with nonconstant unbounded Gaussian wells are incompatible and rejected with their parameters. Temperatures, attempt frequencies and counts must be positive; temperature/frequency must also be finite.
+
+For one million events per run, three barrier samples are kept distinct: one million independent preflight barriers, twelve million offered barriers, and one million chosen barriers. NIST subset results include statistics, applicability, global balance, the runs prerequisite, 50 full blocks of 20,000 bits and no residual bits for one million bits. Median ties are assigned zero and counted. The automatic block size meets M>=20, M>0.01*n and number of blocks<100 from SP 800-22 section 2.2.7.
+
+Plots are black on white, with PNG at least 300 dpi and SVG. The four comparative figures show waiting times, balance within the test blocks, runs counts and p-values. Temporal comparisons use the same first 2,000 events, while tests use all applicable bits. The linear p-value graph preserves exact numerical zeros and separates unavailable tests.
